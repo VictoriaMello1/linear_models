@@ -121,9 +121,65 @@ anova(fit_null, fit_alt) %>%
 ```
 
 
-## Borough Level Difference
+## Borough-Level Difference
 
 ```{r}
+fit =  lm(price ~ stars * borough + room_type * borough, data = nyc_airbnb) 
+
+fit %>% 
+  broom::tidy()
 
 ```
 
+We need to fit 4 models (1 for each borough):
+
+```{r}
+## Create the airbnb_lm function for next step
+airbnb_lm = function(df) {
+  lm(price ~ stars + room_type, data = df)
+}
+
+nyc_airbnb %>% 
+  nest(df = -borough) %>% 
+  mutate(
+    models = map(df, airbnb_lm),
+    results = map(models, broom::tidy)
+  ) %>% 
+  select(borough, results) %>% 
+  unnest(results) %>% 
+  select(borough, term, estimate) %>% 
+  pivot_wider(
+    names_from = term,
+    values_from = estimate
+  ) %>% 
+  knitr::kable(digits = 2)
+
+
+```
+this code creates a handy little table - not for "formal" analysis but very useful
+
+
+Lets do the same thing just this time with creating an "Anonymous Function": 
+```{r}
+## No need to create an airbnb_lm function before using anonymous function in this code:
+nyc_airbnb %>% 
+  nest(df = -borough) %>% 
+  mutate(
+    models = map(df, \(df) lm(price ~ stars + borough, data = df)),
+    results = map(models, broom::tidy)
+  ) %>% 
+  select(borough, results) %>% 
+  unnest(results) %>% 
+  select(borough, term, estimate) %>% 
+  pivot_wider(
+    names_from = term,
+    values_from = estimate
+  ) %>% 
+  knitr::kable(digits = 2)
+
+```
+In this code: 
+mutate(
+ models = map(df, \(df) lm(price ~ stars + borough, data = df)),
+  -- this mutate step is the only thing changing to create the "anonymous function" intended to mimic a whole function that you created and named (like what we did above) its doing the same thing as writing the function above (the way shown above is just manually creating the funtion before)
+    
