@@ -1,0 +1,129 @@
+---
+title: "Linear Regression"
+output: github_document
+---
+
+```{r}
+library(tidyverse)
+library(p8105.datasets)
+```
+
+
+# Load and clean the Airbnb Data
+
+```{r}
+data("nyc_airbnb")
+
+nyc_airbnb = 
+  nyc_airbnb |> 
+  mutate(stars = review_scores_location / 2) |> 
+  rename(
+    borough = neighbourhood_group,
+    neighborhood = neighbourhood) |> 
+  filter(borough != "Staten Island") |> 
+  select(price, stars, borough, neighborhood, room_type)
+
+```
+
+
+Lets fit a Model
+
+```{r}
+fit = lm(price ~ stars + borough, data = nyc_airbnb)
+
+nyc_airbnb = 
+  nyc_airbnb |> 
+  mutate(
+    borough = fct_infreq(borough),
+    room_type = fct_infreq(room_type))
+
+fit = lm(price ~ stars + borough, data = nyc_airbnb)
+```
+
+
+Lets look at the fit:
+```{r}
+summary(fit)
+
+summary(fit)$coeff
+
+```
+
+Dont do those things ^ instead - Tidy up the output!
+
+```{r}
+fit %>% 
+  broom::glance()
+```
+- glance gives you a high level look at the model -- comparing lots of models this is helpful 
+
+
+Tidy up the coefficients: 
+```{r}
+fit %>% 
+  broom::tidy() %>% 
+  mutate(term = str_replace(term, "^borough", "Borough: ")) %>% 
+  knitr::kable(digits = 3)
+
+```
+- broom tidy makes anything into a tibble -- very useful 
+
+
+# Fit another model
+
+```{r}
+
+  nyc_airbnb %>% 
+  mutate(
+    borough = fct_infreq(borough),
+    room_type = fct_infreq(room_type))
+
+fit = lm(price ~ stars + borough + room_type, data = nyc_airbnb)
+
+fit %>% 
+  broom::tidy()
+```
+
+
+## Quick look at Regression Diagostics 
+- mostly boils down to get the residuals and examine them to make sure you dont have any overly skewed/non normal distributions in the residuals 
+
+```{r}
+nyc_airbnb %>% 
+  modelr::add_residuals(fit) %>% 
+  ggplot(aes(x = resid)) +
+  geom_density() +
+  xlim(-100, 500)
+
+nyc_airbnb %>% 
+  modelr::add_residuals(fit) %>% 
+  ggplot(aes(x = borough, y = resid)) +
+  geom_violin() 
+
+
+nyc_airbnb %>% 
+  modelr::add_residuals(fit) %>% 
+  ggplot(aes(x = stars, y = resid)) +
+  geom_point() 
+```
+** you can fit a model on one dataset and then use the model on another dataset to see how it works 
+
+## Hypothesis test for a categorical predictor 
+
+lets fit a Null and Alternative Hypothesis model
+
+```{r}
+fit_null = lm(price ~ stars + borough, data = nyc_airbnb)
+fit_alt = lm(price ~ stars + borough + room_type, data = nyc_airbnb)
+
+anova(fit_null, fit_alt) %>% 
+  broom::tidy()
+```
+
+
+## Borough Level Difference
+
+```{r}
+
+```
+
