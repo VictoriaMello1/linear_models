@@ -4,6 +4,8 @@ output: github_document
 ---
 
 ```{r}
+install.packages("tidyverse")
+install.packages("mgcv")
 library(tidyverse)
 library(modelr)
 library(mgcv)
@@ -103,7 +105,8 @@ Luckily, modelr has tools to automate elements of the CV process. In particular,
 
 ```{r}
 cv_df = 
-  crossv_mc(nonlin_df, 100) 
+  nonlin_df %>% 
+  crossv_mc(100) 
 
 ```
 crossv_mc tries to be smart about memory – rather than repeating the dataset a bunch of times, it saves the data once and stores the indexes for each training / testing split using a resample object. This can be coerced to a dataframe, and can often be treated exactly like a dataframe. However, it’s not compatible with gam, so we have to convert each training and testing dataset (and lose that nice memory-saving stuff in the process) using the code below. It’s worth noting, though, that if all the models you want to fit use lm, you can skip this.
@@ -119,4 +122,61 @@ cv_df =
     train = map(train, as_tibble),
     test = map(test, as_tibble))
 ```
+
+```{r}
+cv_df %>% pull(train) %>% nth(3) %>% as_tibble()
+```
+
+
+Now we have many training and testing datasets, and I’d like to fit my candidate models above and assess prediction accuracy as I did for the single training / testing split. To do this, I’ll fit models and obtain RMSEs using mutate + map & map2.
+
+
+APPLY each model to all TRAINING datasets, and EVALUATE on all TESTING datasets:
+```{r}
+# Define a function for linear fitting
+linear_fit_function <- function(df) {
+  lm(formula = formula("y ~ x"), data = df)
+}
+
+# Define a function for smooth fitting
+smooth_fit_function <- function(df) {
+  mgcv::gam(formula = formula("y ~ s(x)"), data = df)
+}
+
+cv_df <- 
+  cv_df %>%
+  mutate(
+    linear_fit = map(train, linear_fit_function),
+    smooth_fit = map(train, smooth_fit_function)
+  ) %>%
+  mutate(
+    rmse_linear = map2_dbl(linear_fit, test, ~rmse(model = .x, data = .y)),
+    rmse_smooth = map2_dbl(smooth_fit, test, ~rmse(model = .x, data = .y))
+  )
+
+cv_df = 
+  cv_df |> 
+  mutate(
+    linear_fit  = map(train, \(df) lm(y ~ x, data = df)),
+    smooth_fit  = map(train, \(df) mgcv::gam(y ~ s(x), data = df)),
+
+    ) %>% 
+  mutate(
+    rmse_linear = map2_dbl(linear_fit, test, \(mod, df) rmse(mod, df)),
+    rmse_smooth = map2_dbl(smooth_fit, test, \(mod, df) rmse(mod, df))
+
+  )
+      
+    
+    smooth_mod  = map(train, \(df) mgcv::gam(y ~ s(x), data = df)),
+    wiggly_mod  = map(train, \(df) gam(y ~ s(x, k = 30), sp = 10e-6, data = df))) |> 
+  mutate(
+    rmse_linear = map2_dbl(linear_mod, test, \(mod, df) rmse(model = mod, data = df)),
+    rmse_smooth = map2_dbl(smooth_mod, test, \(mod, df) rmse(model = mod, data = df)),
+    rmse_wiggly = map2_dbl(wiggly_mod, test, \(mod, df) rmse(model = mod, data = df)))
+
+
+```
+
+
 

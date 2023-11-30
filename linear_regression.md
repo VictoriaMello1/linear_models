@@ -35,7 +35,11 @@ nyc_airbnb =
   select(price, stars, borough, neighborhood, room_type)
 ```
 
-Lets fit a Model
+# Lets fit a Model:
+
+– A good place to start is to consider price as an outcome that may
+depend on rating and borough. We fit that initial model in the following
+code.
 
 ``` r
 fit = lm(price ~ stars + borough, data = nyc_airbnb)
@@ -48,6 +52,19 @@ nyc_airbnb =
 
 fit = lm(price ~ stars + borough, data = nyc_airbnb)
 ```
+
+– The lm function begins with the formula specification – outcome on the
+left of the ~ and predictors separated by + on the right. As we’ll see
+shortly, interactions between variables can be specified using \*. You
+can also specify an intercept-only model (outcome ~ 1), a model with no
+intercept (outcome ~ 0 + …), and a model using all available predictors
+(outcome ~ .).
+
+– R will treat categorical (factor) covariates appropriately and
+predictably: indicator variables are created for each non-reference
+category and included in your model, and the factor level is treated as
+the reference. As with ggplot, being careful with factors is therefore
+critical!
 
 Lets look at the fit:
 
@@ -91,6 +108,11 @@ summary(fit)$coeff
 
 Dont do those things ^ instead - Tidy up the output!
 
+The output of a lm is an object of class lm – a very specific list that
+isn’t a dataframe but that can be manipulated using other functions.
+Some common functions for interacting with lm fits are below, although
+we omit the output.
+
 ``` r
 fit %>% 
   broom::glance()
@@ -103,7 +125,8 @@ fit %>%
     ## # ℹ 3 more variables: deviance <dbl>, df.residual <int>, nobs <int>
 
 - glance gives you a high level look at the model – comparing lots of
-  models this is helpful
+  models this is helpful The broom package has functions for obtaining a
+  quick summary of the model and for cleaning up the coefficient table.
 
 Tidy up the coefficients:
 
@@ -122,7 +145,12 @@ fit %>%
 | Borough: Queens   |  -77.048 |     3.727 |   -20.675 |   0.000 |
 | Borough: Bronx    |  -90.254 |     8.567 |   -10.534 |   0.000 |
 
-- broom tidy makes anything into a tibble – very useful
+- broom tidy makes anything into a tibble – very useful Both of these
+  functions produce data frames, which makes it straightforward to
+  include the results in subsequent steps. – As an aside, broom::tidy
+  works with lots of things, including most of the functions for model
+  fitting you’re likely to run into (survival, mixed models, additive
+  models, …).
 
 # Fit another model
 
@@ -170,7 +198,11 @@ fit %>%
 
 - mostly boils down to get the residuals and examine them to make sure
   you dont have any overly skewed/non normal distributions in the
-  residuals
+  residuals – Regression diagnostics can identify issues in model fit,
+  especially related to certain failures in model assumptions. Examining
+  residuals and fitted values are therefore an imporant component of any
+  modeling exercise. –The modelr package can be used to add residuals
+  and fitted values to a dataframe.
 
 ``` r
 nyc_airbnb %>% 
@@ -206,7 +238,23 @@ nyc_airbnb %>%
 
 ![](linear_regression_files/figure-gfm/unnamed-chunk-8-3.png)<!-- -->
 \*\* you can fit a model on one dataset and then use the model on
-another dataset to see how it works
+another dataset to see how it works – This example has some obvious
+issues, most notably the presence of extremely large outliers in price
+and a generally skewed residual distribution. There are a few things we
+might try to do here – including creating a formal rule for the
+exclusion of outliers, transforming the price variable (e.g. using a log
+transformation), or fitting a model that is robust to outliers. Dealing
+with these issues isn’t really the purpose of this class, though, so
+we’ll note the issues and move on; shortly we’ll look at using the
+bootstrap for inference in cases like this, where standard approaches to
+inference may fail.
+
+– (For what it’s worth, I’d probably use a combination of median
+regression, which is less sensitive to outliers than OLS, and maybe
+bootstrapping for inference. If that’s not feasible, I’d omit rentals
+with price over \$1000 (\< 0.5% of the sample) from the primary analysis
+and examine these separately. I usually avoid transforming the outcome,
+because the results model is difficult to interpret.)
 
 ## Hypothesis test for a categorical predictor
 
@@ -226,7 +274,20 @@ anova(fit_null, fit_alt) %>%
     ## 1 price ~ stars + borough           30525 1.01e9    NA NA            NA       NA
     ## 2 price ~ stars + borough + …       30523 9.21e8     2  8.42e7     1394.       0
 
-## Borough-Level Difference
+Note that this works for nested models only. Comparing non-nested models
+is a common problem that requires other methods; we’ll see one approach
+in cross validation.
+
+Testing multiple coefficients is somewhat more complicated. A useful
+approach is to use nested models, meaning that the terms in a simple
+“null” model are a subset of the terms in a more complex “alternative”
+model. The are formal tests for comparing the null and alternative
+models, even when several coefficients are added in the alternative
+model. Tests of this kind are required to assess the significance of a
+categorical predictor with more than two levels, as in the example
+below.
+
+## Nesting Data: Borough-Level Differences
 
 ``` r
 fit =  lm(price ~ stars * borough + room_type * borough, data = nyc_airbnb) 
@@ -316,12 +377,134 @@ nyc_airbnb %>%
 | Brooklyn  |       69.63 | 20.97 |                -92.22 |              -105.84 |
 | Manhattan |       95.69 | 27.11 |               -124.19 |              -153.64 |
 
-In this code: mutate( \## models = map(df, (df) lm(price ~ stars +
-borough, data = df)), – this mutate step is the only thing changing to
-create the “anonymous function” intended to mimic a whole function that
+In this code: in the mutate step is the only thing changing here is
+creating an “anonymous function” intended to mimic a whole function that
 you created and named (like what we did above) its doing the same thing
 as writing the function above (the way shown above is just manually
 creating the funtion before)
+
+We’ll now turn our attention to fitting models to datasets nested within
+variables – meaning, essentially, that we’ll use nest() to create a list
+column containing datasets and fit separate models to each. This is very
+different from fitting nested models, even though the terminology is
+similar.
+
+In the airbnb data, we might think that star ratings and room type
+affects price differently in each borough. One way to allow this kind of
+effect modification is through interaction terms:
+
+``` r
+nyc_airbnb |> 
+  lm(price ~ stars * borough + room_type * borough, data = _) |> 
+  broom::tidy() |> 
+  knitr::kable(digits = 3)
+```
+
+| term                                  | estimate | std.error | statistic | p.value |
+|:--------------------------------------|---------:|----------:|----------:|--------:|
+| (Intercept)                           |   95.694 |    19.184 |     4.988 |   0.000 |
+| stars                                 |   27.110 |     3.965 |     6.838 |   0.000 |
+| boroughBrooklyn                       |  -26.066 |    25.080 |    -1.039 |   0.299 |
+| boroughQueens                         |   -4.118 |    40.674 |    -0.101 |   0.919 |
+| boroughBronx                          |   -5.627 |    77.808 |    -0.072 |   0.942 |
+| room_typePrivate room                 | -124.188 |     2.996 |   -41.457 |   0.000 |
+| room_typeShared room                  | -153.635 |     8.692 |   -17.676 |   0.000 |
+| stars:boroughBrooklyn                 |   -6.139 |     5.237 |    -1.172 |   0.241 |
+| stars:boroughQueens                   |  -17.455 |     8.539 |    -2.044 |   0.041 |
+| stars:boroughBronx                    |  -22.664 |    17.099 |    -1.325 |   0.185 |
+| boroughBrooklyn:room_typePrivate room |   31.965 |     4.328 |     7.386 |   0.000 |
+| boroughQueens:room_typePrivate room   |   54.933 |     7.459 |     7.365 |   0.000 |
+| boroughBronx:room_typePrivate room    |   71.273 |    18.002 |     3.959 |   0.000 |
+| boroughBrooklyn:room_typeShared room  |   47.797 |    13.895 |     3.440 |   0.001 |
+| boroughQueens:room_typeShared room    |   58.662 |    17.897 |     3.278 |   0.001 |
+| boroughBronx:room_typeShared room     |   83.089 |    42.451 |     1.957 |   0.050 |
+
+This works, but the output takes time to think through – the expected
+change in price comparing an entire apartment to a private room in
+Queens, for example, involves the main effect of room type and the
+Queens / private room interaction.
+
+Alternatively, we can nest within boroughs and fit borough-specific
+models associating price with rating and room type:
+
+``` r
+nest_lm_res =
+  nyc_airbnb |> 
+  nest(data = -borough) |> 
+  mutate(
+    models = map(data, \(df) lm(price ~ stars + room_type, data = df)),
+    results = map(models, broom::tidy)) |> 
+  select(-data, -models) |> 
+  unnest(results)
+```
+
+The results of this approach are given in the table below.
+
+``` r
+nest_lm_res |> 
+  select(borough, term, estimate) |> 
+  mutate(term = fct_inorder(term)) |> 
+  pivot_wider(
+    names_from = term, values_from = estimate) |> 
+  knitr::kable(digits = 3)
+```
+
+| borough   | (Intercept) |  stars | room_typePrivate room | room_typeShared room |
+|:----------|------------:|-------:|----------------------:|---------------------:|
+| Bronx     |      90.067 |  4.446 |               -52.915 |              -70.547 |
+| Queens    |      91.575 |  9.654 |               -69.255 |              -94.973 |
+| Brooklyn  |      69.627 | 20.971 |               -92.223 |             -105.839 |
+| Manhattan |      95.694 | 27.110 |              -124.188 |             -153.635 |
+
+– The estimates here are the same as those in the model containing
+interactions, but are easier to extract from the output. – Fitting
+models to nested datasets is a way of performing stratified analyses.
+These have a tradeoff: stratified models make it easy to interpret
+covariate effects in each stratum, but don’t provide a mechanism for
+assessing the significance of differences across strata.
+
+An even more extreme example is the assessment of neighborhood effects
+in Manhattan. The code chunk below fits neighborhood-specific models:
+
+``` r
+manhattan_airbnb =
+  nyc_airbnb |> 
+  filter(borough == "Manhattan")
+
+manhattan_nest_lm_res =
+  manhattan_airbnb |> 
+  nest(data = -neighborhood) |> 
+  mutate(
+    models = map(data, \(df) lm(price ~ stars + room_type, data = df)),
+    results = map(models, broom::tidy)) |> 
+  select(-data, -models) |> 
+  unnest(results)
+```
+
+And the chunk below shows neighborhood-specific estimates for the
+coefficients related to room type.
+
+``` r
+manhattan_nest_lm_res |> 
+  filter(str_detect(term, "room_type")) |> 
+  ggplot(aes(x = neighborhood, y = estimate)) + 
+  geom_point() + 
+  facet_wrap(~term) + 
+  theme(axis.text.x = element_text(angle = 80, hjust = 1))
+```
+
+![](linear_regression_files/figure-gfm/unnamed-chunk-17-1.png)<!-- -->
+There is, generally speaking, a reduction in room price for a private
+room or a shared room compared to an entire apartment, but this varies
+quite a bit across neighborhoods.
+
+With this many factor levels, it really isn’t a good idea to fit models
+with main effects or interactions for each. Instead, you’d be best-off
+using a mixed model, with random intercepts and slopes for each
+neighborhood. Although it’s well beyond the scope of this class, code to
+fit a mixed model with neighborhood-level random intercepts and random
+slopes for room type is below. And, of course, we can tidy the results
+using a mixed-model spinoff of the broom package.
 
 ## Homicides in Baltimore – LOGISTIC REGRESSION (binary outcome)
 
