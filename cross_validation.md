@@ -185,7 +185,8 @@ times, a stores the datasets using list columns:
 
 ``` r
 cv_df = 
-  crossv_mc(nonlin_df, 100) 
+  nonlin_df %>% 
+  crossv_mc(100) 
 ```
 
 crossv_mc tries to be smart about memory – rather than repeating the
@@ -242,3 +243,121 @@ cv_df =
     train = map(train, as_tibble),
     test = map(test, as_tibble))
 ```
+
+``` r
+cv_df %>% pull(train) %>% nth(3) %>% as_tibble()
+```
+
+    ## # A tibble: 79 × 3
+    ##       id     x      y
+    ##    <int> <dbl>  <dbl>
+    ##  1     1 0.266  1.11 
+    ##  2     2 0.372  0.764
+    ##  3     3 0.573  0.358
+    ##  4     4 0.908 -3.04 
+    ##  5     5 0.202  1.33 
+    ##  6     6 0.898 -1.99 
+    ##  7     7 0.945 -3.27 
+    ##  8    11 0.206  1.63 
+    ##  9    12 0.177  0.836
+    ## 10    13 0.687 -0.291
+    ## # ℹ 69 more rows
+
+Now we have many training and testing datasets, and I’d like to fit my
+candidate models above and assess prediction accuracy as I did for the
+single training / testing split. To do this, I’ll fit models and obtain
+RMSEs using mutate + map & map2.
+
+APPLY each model to all TRAINING datasets, and EVALUATE on all TESTING
+datasets:
+
+``` r
+# Define a function for linear fitting
+linear_fit_function <- function(df) {
+  lm(formula = formula("y ~ x"), data = df)
+}
+
+# Define a function for smooth fitting
+smooth_fit_function <- function(df) {
+  mgcv::gam(formula = formula("y ~ s(x)"), data = df)
+}
+
+cv_df <- 
+  cv_df %>%
+  mutate(
+    linear_fit = map(train, linear_fit_function),
+    smooth_fit = map(train, smooth_fit_function)
+  ) %>%
+  mutate(
+    rmse_linear = map2_dbl(linear_fit, test, ~rmse(model = .x, data = .y)),
+    rmse_smooth = map2_dbl(smooth_fit, test, ~rmse(model = .x, data = .y))
+  )
+
+cv_results = 
+  cv_df |> 
+  mutate(
+    linear_fit  = map(train, \(df) lm(y ~ x, data = df)),
+    smooth_fit  = map(train, \(df) mgcv::gam(y ~ s(x), data = df)),
+    wiggly_fit  = map(train, \(df) mgcv::gam(y ~ s(x, k = 30), sp = 10e-6, data = df))
+
+    ) %>% 
+  mutate(
+    rmse_linear = map2_dbl(linear_fit, test, \(mod, df) rmse(mod, df)),
+    rmse_smooth = map2_dbl(smooth_fit, test, \(mod, df) rmse(mod, df)),
+    rmse_wiggly = map2_dbl(wiggly_fit, test, \(mod, df) rmse(mod, df))
+
+    )
+
+cv_results
+```
+
+    ## # A tibble: 100 × 9
+    ##    train    test     .id   linear_fit smooth_fit rmse_linear rmse_smooth
+    ##    <list>   <list>   <chr> <list>     <list>           <dbl>       <dbl>
+    ##  1 <tibble> <tibble> 001   <lm>       <gam>            0.675       0.298
+    ##  2 <tibble> <tibble> 002   <lm>       <gam>            0.655       0.336
+    ##  3 <tibble> <tibble> 003   <lm>       <gam>            0.785       0.295
+    ##  4 <tibble> <tibble> 004   <lm>       <gam>            0.874       0.263
+    ##  5 <tibble> <tibble> 005   <lm>       <gam>            0.784       0.250
+    ##  6 <tibble> <tibble> 006   <lm>       <gam>            0.844       0.324
+    ##  7 <tibble> <tibble> 007   <lm>       <gam>            0.791       0.274
+    ##  8 <tibble> <tibble> 008   <lm>       <gam>            0.758       0.310
+    ##  9 <tibble> <tibble> 009   <lm>       <gam>            0.621       0.287
+    ## 10 <tibble> <tibble> 010   <lm>       <gam>            0.839       0.338
+    ## # ℹ 90 more rows
+    ## # ℹ 2 more variables: wiggly_fit <list>, rmse_wiggly <dbl>
+
+``` r
+cv_results %>% 
+  select(starts_with("rmse")) %>% 
+  pivot_longer(
+    everything(),
+    names_to = "model_type", 
+    values_to = "rmse",
+    names_prefix = "rmse_") %>% 
+  group_by(model_type) %>% 
+  summarize(m_rmse = mean(rmse))
+```
+
+    ## # A tibble: 3 × 2
+    ##   model_type m_rmse
+    ##   <chr>       <dbl>
+    ## 1 linear      0.718
+    ## 2 smooth      0.289
+    ## 3 wiggly      0.354
+
+``` r
+## can also plot this with GGplot
+
+cv_results %>% 
+  select(starts_with("rmse")) %>% 
+  pivot_longer(
+    everything(),
+    names_to = "model_type", 
+    values_to = "rmse",
+    names_prefix = "rmse_") %>% 
+  ggplot(aes(x = model_type, y = rmse)) +
+  geom_violin()
+```
+
+![](cross_validation_files/figure-gfm/unnamed-chunk-13-1.png)<!-- -->

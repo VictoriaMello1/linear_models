@@ -4,8 +4,6 @@ output: github_document
 ---
 
 ```{r}
-install.packages("tidyverse")
-install.packages("mgcv")
 library(tidyverse)
 library(modelr)
 library(mgcv)
@@ -127,7 +125,6 @@ cv_df =
 cv_df %>% pull(train) %>% nth(3) %>% as_tibble()
 ```
 
-
 Now we have many training and testing datasets, and I’d like to fit my candidate models above and assess prediction accuracy as I did for the single training / testing split. To do this, I’ll fit models and obtain RMSEs using mutate + map & map2.
 
 
@@ -154,29 +151,49 @@ cv_df <-
     rmse_smooth = map2_dbl(smooth_fit, test, ~rmse(model = .x, data = .y))
   )
 
-cv_df = 
+cv_results = 
   cv_df |> 
   mutate(
     linear_fit  = map(train, \(df) lm(y ~ x, data = df)),
     smooth_fit  = map(train, \(df) mgcv::gam(y ~ s(x), data = df)),
+    wiggly_fit  = map(train, \(df) mgcv::gam(y ~ s(x, k = 30), sp = 10e-6, data = df))
 
     ) %>% 
   mutate(
     rmse_linear = map2_dbl(linear_fit, test, \(mod, df) rmse(mod, df)),
-    rmse_smooth = map2_dbl(smooth_fit, test, \(mod, df) rmse(mod, df))
+    rmse_smooth = map2_dbl(smooth_fit, test, \(mod, df) rmse(mod, df)),
+    rmse_wiggly = map2_dbl(wiggly_fit, test, \(mod, df) rmse(mod, df))
 
-  )
-      
-    
-    smooth_mod  = map(train, \(df) mgcv::gam(y ~ s(x), data = df)),
-    wiggly_mod  = map(train, \(df) gam(y ~ s(x, k = 30), sp = 10e-6, data = df))) |> 
-  mutate(
-    rmse_linear = map2_dbl(linear_mod, test, \(mod, df) rmse(model = mod, data = df)),
-    rmse_smooth = map2_dbl(smooth_mod, test, \(mod, df) rmse(model = mod, data = df)),
-    rmse_wiggly = map2_dbl(wiggly_mod, test, \(mod, df) rmse(model = mod, data = df)))
+    )
 
-
+cv_results
 ```
 
+
+```{r}
+cv_results %>% 
+  select(starts_with("rmse")) %>% 
+  pivot_longer(
+    everything(),
+    names_to = "model_type", 
+    values_to = "rmse",
+    names_prefix = "rmse_") %>% 
+  group_by(model_type) %>% 
+  summarize(m_rmse = mean(rmse))
+  
+
+
+## can also plot this with GGplot
+
+cv_results %>% 
+  select(starts_with("rmse")) %>% 
+  pivot_longer(
+    everything(),
+    names_to = "model_type", 
+    values_to = "rmse",
+    names_prefix = "rmse_") %>% 
+  ggplot(aes(x = model_type, y = rmse)) +
+  geom_violin()
+```
 
 
