@@ -258,6 +258,7 @@ fit %>%
 We need to fit 4 models (1 for each borough):
 
 ``` r
+## Create the airbnb_lm function for next step
 airbnb_lm = function(df) {
   lm(price ~ stars + room_type, data = df)
 }
@@ -269,25 +270,131 @@ nyc_airbnb %>%
     results = map(models, broom::tidy)
   ) %>% 
   select(borough, results) %>% 
-  unnest(results)
+  unnest(results) %>% 
+  select(borough, term, estimate) %>% 
+  pivot_wider(
+    names_from = term,
+    values_from = estimate
+  ) %>% 
+  knitr::kable(digits = 2)
 ```
 
-    ## # A tibble: 16 × 6
-    ##    borough   term                  estimate std.error statistic   p.value
-    ##    <fct>     <chr>                    <dbl>     <dbl>     <dbl>     <dbl>
-    ##  1 Bronx     (Intercept)              90.1      15.2       5.94 5.73e-  9
-    ##  2 Bronx     stars                     4.45      3.35      1.33 1.85e-  1
-    ##  3 Bronx     room_typePrivate room   -52.9       3.57    -14.8  6.21e- 41
-    ##  4 Bronx     room_typeShared room    -70.5       8.36     -8.44 4.16e- 16
-    ##  5 Queens    (Intercept)              91.6      25.8       3.54 4.00e-  4
-    ##  6 Queens    stars                     9.65      5.45      1.77 7.65e-  2
-    ##  7 Queens    room_typePrivate room   -69.3       4.92    -14.1  1.48e- 43
-    ##  8 Queens    room_typeShared room    -95.0      11.3      -8.43 5.52e- 17
-    ##  9 Brooklyn  (Intercept)              69.6      14.0       4.96 7.27e-  7
-    ## 10 Brooklyn  stars                    21.0       2.98      7.05 1.90e- 12
-    ## 11 Brooklyn  room_typePrivate room   -92.2       2.72    -34.0  6.40e-242
-    ## 12 Brooklyn  room_typeShared room   -106.        9.43    -11.2  4.15e- 29
-    ## 13 Manhattan (Intercept)              95.7      22.2       4.31 1.62e-  5
-    ## 14 Manhattan stars                    27.1       4.59      5.91 3.45e-  9
-    ## 15 Manhattan room_typePrivate room  -124.        3.46    -35.8  9.40e-270
-    ## 16 Manhattan room_typeShared room   -154.       10.1     -15.3  2.47e- 52
+| borough   | (Intercept) | stars | room_typePrivate room | room_typeShared room |
+|:----------|------------:|------:|----------------------:|---------------------:|
+| Bronx     |       90.07 |  4.45 |                -52.91 |               -70.55 |
+| Queens    |       91.58 |  9.65 |                -69.26 |               -94.97 |
+| Brooklyn  |       69.63 | 20.97 |                -92.22 |              -105.84 |
+| Manhattan |       95.69 | 27.11 |               -124.19 |              -153.64 |
+
+this code creates a handy little table - not for “formal” analysis but
+very useful
+
+Lets do the same thing just this time with creating an “Anonymous
+Function”:
+
+``` r
+nyc_airbnb %>% 
+  nest(df = -borough) %>% 
+  mutate(
+    models = map(df, \(df) lm(price ~ stars + room_type, data = df)),
+    results = map(models, broom::tidy)
+  ) %>% 
+  select(borough, results) %>% 
+  unnest(results) %>% 
+  select(borough, term, estimate) %>% 
+  pivot_wider(
+    names_from = term,
+    values_from = estimate
+  ) %>% 
+  knitr::kable(digits = 2)
+```
+
+| borough   | (Intercept) | stars | room_typePrivate room | room_typeShared room |
+|:----------|------------:|------:|----------------------:|---------------------:|
+| Bronx     |       90.07 |  4.45 |                -52.91 |               -70.55 |
+| Queens    |       91.58 |  9.65 |                -69.26 |               -94.97 |
+| Brooklyn  |       69.63 | 20.97 |                -92.22 |              -105.84 |
+| Manhattan |       95.69 | 27.11 |               -124.19 |              -153.64 |
+
+In this code: mutate( \## models = map(df, (df) lm(price ~ stars +
+borough, data = df)), – this mutate step is the only thing changing to
+create the “anonymous function” intended to mimic a whole function that
+you created and named (like what we did above) its doing the same thing
+as writing the function above (the way shown above is just manually
+creating the funtion before)
+
+## Homicides in Baltimore – LOGISTIC REGRESSION (binary outcome)
+
+``` r
+baltimore_df = 
+  read_csv("data/homicide-data.csv") |> 
+  filter(city == "Baltimore") |> 
+  mutate(
+    resolved = as.numeric(disposition == "Closed by arrest"),
+    victim_age = as.numeric(victim_age),
+    victim_race = fct_relevel(victim_race, "White")) |> 
+  select(resolved, victim_age, victim_race, victim_sex)
+```
+
+    ## Rows: 52179 Columns: 12
+    ## ── Column specification ────────────────────────────────────────────────────────
+    ## Delimiter: ","
+    ## chr (9): uid, victim_last, victim_first, victim_race, victim_age, victim_sex...
+    ## dbl (3): reported_date, lat, lon
+    ## 
+    ## ℹ Use `spec()` to retrieve the full column specification for this data.
+    ## ℹ Specify the column types or set `show_col_types = FALSE` to quiet this message.
+
+``` r
+view(baltimore_df)
+```
+
+fit a logistic regression for this dataframe
+
+``` r
+fit_logistic = 
+  baltimore_df |> 
+  glm(resolved ~ victim_age + victim_race + victim_sex, 
+      data = _, 
+      family = binomial()) 
+```
+
+Look at model results:
+
+``` r
+fit_logistic %>% 
+  broom::tidy()
+```
+
+    ## # A tibble: 7 × 5
+    ##   term                estimate std.error statistic  p.value
+    ##   <chr>                  <dbl>     <dbl>     <dbl>    <dbl>
+    ## 1 (Intercept)          1.19      0.235       5.07  4.04e- 7
+    ## 2 victim_age          -0.00724   0.00327    -2.21  2.68e- 2
+    ## 3 victim_raceAsian     0.296     0.660       0.449 6.53e- 1
+    ## 4 victim_raceBlack    -0.842     0.175      -4.81  1.47e- 6
+    ## 5 victim_raceHispanic -0.265     0.317      -0.837 4.02e- 1
+    ## 6 victim_raceOther    -0.768     0.883      -0.870 3.85e- 1
+    ## 7 victim_sexMale      -0.880     0.136      -6.45  1.15e-10
+
+The table below summaries the coefficients from the model fit; because
+logistic model estimates are log odds ratios, we include a step to
+compute odds ratios as well.
+
+``` r
+fit_logistic |> 
+  broom::tidy() |> 
+  mutate(OR = exp(estimate)) |>
+  select(term, log_OR = estimate, OR, p.value) |> 
+  knitr::kable(digits = 3)
+```
+
+| term                | log_OR |    OR | p.value |
+|:--------------------|-------:|------:|--------:|
+| (Intercept)         |  1.190 | 3.287 |   0.000 |
+| victim_age          | -0.007 | 0.993 |   0.027 |
+| victim_raceAsian    |  0.296 | 1.345 |   0.653 |
+| victim_raceBlack    | -0.842 | 0.431 |   0.000 |
+| victim_raceHispanic | -0.265 | 0.767 |   0.402 |
+| victim_raceOther    | -0.768 | 0.464 |   0.385 |
+| victim_sexMale      | -0.880 | 0.415 |   0.000 |

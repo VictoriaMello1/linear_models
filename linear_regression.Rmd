@@ -161,11 +161,11 @@ this code creates a handy little table - not for "formal" analysis but very usef
 
 Lets do the same thing just this time with creating an "Anonymous Function": 
 ```{r}
-## No need to create an airbnb_lm function before using anonymous function in this code:
+
 nyc_airbnb %>% 
   nest(df = -borough) %>% 
   mutate(
-    models = map(df, \(df) lm(price ~ stars + borough, data = df)),
+    models = map(df, \(df) lm(price ~ stars + room_type, data = df)),
     results = map(models, broom::tidy)
   ) %>% 
   select(borough, results) %>% 
@@ -180,6 +180,50 @@ nyc_airbnb %>%
 ```
 In this code: 
 mutate(
- models = map(df, \(df) lm(price ~ stars + borough, data = df)),
+## models = map(df, \(df) lm(price ~ stars + borough, data = df)),
   -- this mutate step is the only thing changing to create the "anonymous function" intended to mimic a whole function that you created and named (like what we did above) its doing the same thing as writing the function above (the way shown above is just manually creating the funtion before)
     
+
+
+
+## Homicides in Baltimore -- LOGISTIC REGRESSION (binary outcome)
+
+```{r}
+baltimore_df = 
+  read_csv("data/homicide-data.csv") |> 
+  filter(city == "Baltimore") |> 
+  mutate(
+    resolved = as.numeric(disposition == "Closed by arrest"),
+    victim_age = as.numeric(victim_age),
+    victim_race = fct_relevel(victim_race, "White")) |> 
+  select(resolved, victim_age, victim_race, victim_sex)
+
+view(baltimore_df)
+```
+
+
+fit a logistic regression for this dataframe
+
+```{r}
+fit_logistic = 
+  baltimore_df |> 
+  glm(resolved ~ victim_age + victim_race + victim_sex, 
+      data = _, 
+      family = binomial()) 
+```
+
+Look at model results:
+```{r}
+fit_logistic %>% 
+  broom::tidy()
+```
+
+The table below summaries the coefficients from the model fit; because logistic model estimates are log odds ratios, we include a step to compute odds ratios as well.
+```{r}
+fit_logistic |> 
+  broom::tidy() |> 
+  mutate(OR = exp(estimate)) |>
+  select(term, log_OR = estimate, OR, p.value) |> 
+  knitr::kable(digits = 3)
+```
+
