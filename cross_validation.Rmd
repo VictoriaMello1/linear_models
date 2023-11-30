@@ -1,185 +1,122 @@
 ---
-title: "Linear Regression"
+title: "Cross Validation"
 output: github_document
 ---
 
 ```{r}
 library(tidyverse)
-library(p8105.datasets)
+library(modelr)
+library(mgcv)
+```
+
+```{r}
+set.seed(1)
 ```
 
 
-# Load and clean the Airbnb Data
+```{r}
+nonlin_df = 
+  tibble(
+    id = 1:100,
+    x = runif(100, 0, 1),
+    y = 1 - 10 * (x - .3) ^ 2 + rnorm(100, 0, .3)
+  )
+
+nonlin_df |> 
+  ggplot(aes(x = x, y = y)) + 
+  geom_point()
+```
+
+Do the Train / Test split:
 
 ```{r}
-data("nyc_airbnb")
+train_df = sample_n(nonlin_df, 80)
+test_df = anti_join(nonlin_df, train_df, by = "id")
 
-nyc_airbnb = 
-  nyc_airbnb |> 
-  mutate(stars = review_scores_location / 2) |> 
-  rename(
-    borough = neighbourhood_group,
-    neighborhood = neighbourhood) |> 
-  filter(borough != "Staten Island") |> 
-  select(price, stars, borough, neighborhood, room_type)
+ggplot(train_df, aes(x = x, y = y)) + 
+  geom_point() + 
+  geom_point(data = test_df, color = "red")
+```
+-- Here I have split this data into training and test sets (using anti_join!!), and replot showing the split. Our goal will be to use the training data (in black) to build candidate models, and then see how those models predict in the testing data (in red).
 
+
+
+I’ll fit three three models to the training data. Throughout, I’m going to use mgcv::gam for non-linear models – this is my go-to package for “additive models”, and I much prefer it to e.g. polynomial models. For today, you don’t have to know what this means, how gam works, or why I prefer it – just know that we’re putting smooth lines through data clouds, and we can control how smooth we want the fit to be.
+
+```{r}
+linear_mod = lm(y ~ x, data = train_df)
+smooth_mod = mgcv::gam(y ~ s(x), data = train_df)
+wiggly_mod = mgcv::gam(y ~ s(x, k = 30), sp = 10e-6, data = train_df)
+```
+The three models above have very different levels of complexity and aren’t nested, so testing approaches for nested model don’t apply.
+
+
+To understand what these models have done, I’ll plot the two gam fits:
+```{r}
+train_df |> 
+  add_predictions(smooth_mod) |> 
+  ggplot(aes(x = x, y = y)) + geom_point() + 
+  geom_line(aes(y = pred), color = "red")
+
+train_df |> 
+  add_predictions(wiggly_mod) |> 
+  ggplot(aes(x = x, y = y)) + geom_point() + 
+  geom_line(aes(y = pred), color = "red")
 ```
 
 
-Lets fit a Model
+In a case like this, I can also use the handy modelr::gather_predictions function – this is, essentially, a short way of adding predictions for several models to a data frame and then “pivoting” so the result is a tidy, “long” dataset that’s easily plottable:
+```{r}
+train_df |> 
+  gather_predictions(linear_mod, smooth_mod, wiggly_mod) |> 
+  mutate(model = fct_inorder(model)) |> 
+  ggplot(aes(x = x, y = y)) + 
+  geom_point() + 
+  geom_line(aes(y = pred), color = "red") + 
+  facet_wrap(~model)
+```
+--> A quick visual inspection suggests that the linear model is too simple, the standard gam fit is pretty good, and the wiggly gam fit is too complex. Put differently, the linear model is too simple and, no matter what training data we use, will never capture the true relationship between variables – it will be consistently wrong due to its simplicity, and is therefore biased. The wiggly fit, on the other hand, is chasing data points and will change a lot from one training dataset to the the next – it will be consistently wrong due to its complexity, and is therefore highly variable. Both are bad!
+
+
+As a next step in my CV procedure, I’ll compute root mean squared errors (RMSEs) for each model:
 
 ```{r}
-fit = lm(price ~ stars + borough, data = nyc_airbnb)
+## RMSE on training data can be misleading 
+rmse(linear_mod, train_df)
+rmse(smooth_mod, train_df)
+rmse(wiggly_mod, train_df)
 
-nyc_airbnb = 
-  nyc_airbnb |> 
+## RMSE on Testing data gives a sense of out of sample prediction accuracy!
+rmse(linear_mod, test_df)
+rmse(smooth_mod, test_df)
+rmse(wiggly_mod, test_df)
+```
+-- The modelr has other outcome measures – RMSE is the most common, but median absolute deviation is pretty common as well.
+-- The RMSEs are suggestive that both nonlinear models work better than the linear model, and that the smooth fit is better than the wiggly fit. However, to get a sense of model stability we really need to iterate this whole process. Of course, this could be done using loops but that’s a hassle …
+
+
+
+# CV using modelr
+
+
+Luckily, modelr has tools to automate elements of the CV process. In particular, crossv_mc preforms the training / testing split multiple times, a stores the datasets using list columns:
+
+```{r}
+cv_df = 
+  crossv_mc(nonlin_df, 100) 
+
+```
+crossv_mc tries to be smart about memory – rather than repeating the dataset a bunch of times, it saves the data once and stores the indexes for each training / testing split using a resample object. This can be coerced to a dataframe, and can often be treated exactly like a dataframe. However, it’s not compatible with gam, so we have to convert each training and testing dataset (and lose that nice memory-saving stuff in the process) using the code below. It’s worth noting, though, that if all the models you want to fit use lm, you can skip this.
+
+
+```{r}
+cv_df |> pull(train) |> nth(1) |> as_tibble()
+cv_df |> pull(test) |> nth(1) |> as_tibble()
+
+cv_df =
+  cv_df |> 
   mutate(
-    borough = fct_infreq(borough),
-    room_type = fct_infreq(room_type))
-
-fit = lm(price ~ stars + borough, data = nyc_airbnb)
+    train = map(train, as_tibble),
+    test = map(test, as_tibble))
 ```
 
-
-Lets look at the fit:
-```{r}
-summary(fit)
-
-summary(fit)$coeff
-
-```
-
-Dont do those things ^ instead - Tidy up the output!
-
-```{r}
-fit %>% 
-  broom::glance()
-```
-- glance gives you a high level look at the model -- comparing lots of models this is helpful 
-
-
-Tidy up the coefficients: 
-```{r}
-fit %>% 
-  broom::tidy() %>% 
-  mutate(term = str_replace(term, "^borough", "Borough: ")) %>% 
-  knitr::kable(digits = 3)
-
-```
-- broom tidy makes anything into a tibble -- very useful 
-
-
-# Fit another model
-
-```{r}
-
-  nyc_airbnb %>% 
-  mutate(
-    borough = fct_infreq(borough),
-    room_type = fct_infreq(room_type))
-
-fit = lm(price ~ stars + borough + room_type, data = nyc_airbnb)
-
-fit %>% 
-  broom::tidy()
-```
-
-
-## Quick look at Regression Diagostics 
-- mostly boils down to get the residuals and examine them to make sure you dont have any overly skewed/non normal distributions in the residuals 
-
-```{r}
-nyc_airbnb %>% 
-  modelr::add_residuals(fit) %>% 
-  ggplot(aes(x = resid)) +
-  geom_density() +
-  xlim(-100, 500)
-
-nyc_airbnb %>% 
-  modelr::add_residuals(fit) %>% 
-  ggplot(aes(x = borough, y = resid)) +
-  geom_violin() 
-
-
-nyc_airbnb %>% 
-  modelr::add_residuals(fit) %>% 
-  ggplot(aes(x = stars, y = resid)) +
-  geom_point() 
-```
-** you can fit a model on one dataset and then use the model on another dataset to see how it works 
-
-## Hypothesis test for a categorical predictor 
-
-lets fit a Null and Alternative Hypothesis model
-
-```{r}
-fit_null = lm(price ~ stars + borough, data = nyc_airbnb)
-fit_alt = lm(price ~ stars + borough + room_type, data = nyc_airbnb)
-
-anova(fit_null, fit_alt) %>% 
-  broom::tidy()
-```
-
-
-## Borough-Level Difference
-
-```{r}
-fit =  lm(price ~ stars * borough + room_type * borough, data = nyc_airbnb) 
-
-fit %>% 
-  broom::tidy()
-
-```
-
-We need to fit 4 models (1 for each borough):
-
-```{r}
-## Create the airbnb_lm function for next step
-airbnb_lm = function(df) {
-  lm(price ~ stars + room_type, data = df)
-}
-
-nyc_airbnb %>% 
-  nest(df = -borough) %>% 
-  mutate(
-    models = map(df, airbnb_lm),
-    results = map(models, broom::tidy)
-  ) %>% 
-  select(borough, results) %>% 
-  unnest(results) %>% 
-  select(borough, term, estimate) %>% 
-  pivot_wider(
-    names_from = term,
-    values_from = estimate
-  ) %>% 
-  knitr::kable(digits = 2)
-
-
-```
-this code creates a handy little table - not for "formal" analysis but very useful
-
-
-Lets do the same thing just this time with creating an "Anonymous Function": 
-```{r}
-## No need to create an airbnb_lm function before using anonymous function in this code:
-nyc_airbnb %>% 
-  nest(df = -borough) %>% 
-  mutate(
-    models = map(df, \(df) lm(price ~ stars + borough, data = df)),
-    results = map(models, broom::tidy)
-  ) %>% 
-  select(borough, results) %>% 
-  unnest(results) %>% 
-  select(borough, term, estimate) %>% 
-  pivot_wider(
-    names_from = term,
-    values_from = estimate
-  ) %>% 
-  knitr::kable(digits = 2)
-
-```
-In this code: 
-mutate(
- models = map(df, \(df) lm(price ~ stars + borough, data = df)),
-  -- this mutate step is the only thing changing to create the "anonymous function" intended to mimic a whole function that you created and named (like what we did above) its doing the same thing as writing the function above (the way shown above is just manually creating the funtion before)
-    
